@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archery Math Quiz</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000; /* black background outside game */
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<script>
+/* ================================
+   ✅ Class 6 Maths Questions (Sample 10)
+   ================================ */
+const MATH_QUESTIONS = [
+  {q:"Find the next term: 2, 4, 8, 16, ?", opts:["18","24","32"], a:2},
+  {q:"How many degrees in a right angle?", opts:["45°","90°","180°"], a:1},
+  {q:"LCM of 12 and 18 is?", opts:["24","36","48"], a:1},
+  {q:"Area of square side 10 cm?", opts:["100","200","400"], a:0},
+  {q:"Simplify 18/24", opts:["3/4","2/3","4/5"], a:0},
+  {q:"Square has how many lines of symmetry?", opts:["2","4","8"], a:1},
+  {q:"(–8) + 6 = ?", opts:["–14","–2","2"], a:1},
+  {q:"Complementary angles add up to?", opts:["180°","90°","360°"], a:1},
+  {q:"Which is greater: 3/4 or 2/3?", opts:["3/4","2/3","Equal"], a:0},
+  {q:"Smallest prime number?", opts:["1","2","3"], a:1}
+];
+
+/* ================================
+   🎯 Game State
+   ================================ */
+let state = {
+  currentQuestion: null,
+  score: 0,
+  consecutiveCorrect: 0,
+  currentLevel: 0,
+  lives: 3,
+  started: false,
+  gameOver: false
+};
+
+const config = {
+  type: Phaser.AUTO,
+  width: window.innerWidth,   // ✅ full screen width
+  height: window.innerHeight, // ✅ full screen height
+  physics: { default: 'arcade' },
+  scene: { preload, create, update }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+  this.load.image('background', 'assets/archerybackground.png');
+  this.load.image('archer', 'assets/Bow2.png');       
+  this.load.image('arrow', 'assets/Arrow.png');       
+  this.load.image('target', 'assets/target.png');            
+  this.load.audio('shootSound', 'assets/shoot.mp3');         
+  this.load.audio('startwinkle', 'assets/startwinkle.mp3');  
+  this.load.audio('wrongbuzzer', 'assets/wrongbuzzer.mp3');  
+  this.load.audio('backgroundmusic', 'assets/backgroundmusic.mp3'); // 🔊 new
+}
+
+function create() {
+  const scene = this;
+
+  // Background (stretch to fit screen)
+  scene.background = scene.add.image(config.width/2, config.height/2, 'background')
+      .setDisplaySize(config.width, config.height);
+
+  // Archer
+  scene.archer = scene.add.sprite(100, config.height - 100, 'archer').setScale(0.8).setVisible(false);
+
+  // Score & Lives
+  scene.scoreText = scene.add.text(30, 20, 'Score: 0', {
+    fontFamily:'Arial Black', fontSize:'36px', color:'#00ff00'
+  }).setVisible(false);
+
+  scene.livesText = scene.add.text(config.width - 200, 20, 'Lives: 3', {
+    fontFamily:'Arial Black', fontSize:'36px', color:'#ff0000'
+  }).setVisible(false);
+
+  // Question & Comment
+  scene.questionText = scene.add.text(config.width/2, 100, '', {
+    fontFamily:'Impact', fontSize:'40px', color:'#ffffff', stroke:'#000000', strokeThickness:6
+  }).setOrigin(0.5).setVisible(false);
+
+  scene.commentText = scene.add.text(config.width/2, 160, '', {
+    fontFamily:'Impact', fontSize:'32px', color:'#ffff00', stroke:'#000000', strokeThickness:6
+  }).setOrigin(0.5).setVisible(false);
+
+  // Welcome text
+  scene.welcomeText = scene.add.text(config.width/2, config.height/2 - 40, 
+    '🎯 Welcome to the World of Numbers!\nPress SPACE to Start', {
+    fontFamily:'Impact', fontSize:'42px', color:'#ffcc00', stroke:'#000000', strokeThickness:8, align:'center'
+  }).setOrigin(0.5);
+
+  // 🔊 Tap-to-enable-sound instruction
+  scene.soundPrompt = scene.add.text(config.width/2, config.height/2 + 60,
+    '🔊 Tap Here to Enable Sound', {
+    fontFamily:'Impact', fontSize:'36px', color:'#00ff00', stroke:'#000000', strokeThickness:6, align:'center', backgroundColor:'#222'
+  }).setOrigin(0.5).setInteractive();
+
+  // Handle tap/click to start music
+  scene.soundPrompt.on('pointerdown', () => {
+    if(!scene.bgMusic){
+      scene.bgMusic = scene.sound.add('backgroundmusic', { loop:true, volume:0.5 });
+    }
+    scene.bgMusic.play();
+    scene.soundPrompt.setVisible(false);
+  });
+
+  // Targets
+  scene.optionTargets = [];
+  for(let i=0;i<3;i++){
+    let target = scene.add.image(config.width - 200, 250 + i*150, 'target')
+        .setInteractive()
+        .setScale(0.25)
+        .setDepth(0)
+        .setVisible(false);
+    target.optionIndex = i;
+    target.on('pointerdown', () => {
+      if(state.started && !state.gameOver) shootArrow.call(scene, i);
+    });
+    scene.optionTargets.push(target);
+
+    let optText = scene.add.text(target.x, target.y, '', {
+      fontFamily:'Arial Black', fontSize:'24px', color:'#000000', backgroundColor:'#ffffff'
+    }).setOrigin(0.5).setDepth(1).setVisible(false);
+    target.optText = optText;
+  }
+
+  scene.arrows = scene.physics.add.group();
+
+  // Game Over text
+  scene.gameOverText = scene.add.text(config.width/2, config.height/2, '', {
+    fontFamily:'Impact', fontSize:'52px', color:'#ff0000', stroke:'#000000', strokeThickness:8, align:'center'
+  }).setOrigin(0.5).setVisible(false);
+
+  // Keyboard input
+  scene.input.keyboard.on('keydown-SPACE', () => {
+    if(!state.started){ // Start game
+      startGame.call(scene);
+    } else if(state.gameOver){ // Restart game
+      restartGame.call(scene);
+    }
+  });
+
+  // ✅ Resize listener
+  window.addEventListener('resize', () => {
+    game.scale.resize(window.innerWidth, window.innerHeight);
+  });
+}
+
+function startGame() {
+  const scene = this;
+  state.started = true;
+
+  // stop welcome music
+  if(scene.bgMusic) scene.bgMusic.stop();
+
+  scene.welcomeText.setVisible(false);
+  scene.archer.setVisible(true);
+  scene.scoreText.setVisible(true);
+  scene.livesText.setVisible(true);
+  scene.questionText.setVisible(true);
+  scene.commentText.setVisible(true);
+  scene.optionTargets.forEach(t => { t.setVisible(true); t.optText.setVisible(true); });
+  nextQuestion.call(scene);
+}
+
+function nextQuestion() {
+  const scene = this;
+  if(!state.started || state.gameOver) return;
+  scene.arrows.clear(true, true);
+  state.currentQuestion = Phaser.Utils.Array.GetRandom(MATH_QUESTIONS);
+  scene.questionText.setText(state.currentQuestion.q);
+  scene.commentText.setText('');
+  for(let i=0;i<3;i++){
+    scene.optionTargets[i].optText.setText(state.currentQuestion.opts[i]);
+  }
+}
+
+function shootArrow(index) {
+  const scene = this;
+  let target = scene.optionTargets[index];
+
+  scene.sound.play('shootSound');
+  let arrow = scene.physics.add.image(scene.archer.x + 50, scene.archer.y - 20, 'arrow').setScale(0.2);
+  scene.arrows.add(arrow);
+
+  let angle = Phaser.Math.Angle.Between(arrow.x, arrow.y, target.x, target.y);
+  arrow.setRotation(angle - Math.PI/2 - 2.3);
+  scene.physics.moveTo(arrow, target.x, target.y, 600);
+
+  const hitCheck = scene.time.addEvent({
+    delay: 10,
+    loop: true,
+    callback: () => {
+      const dist = Phaser.Math.Distance.Between(arrow.x, arrow.y, target.x, target.y);
+      if(dist < 10){
+        arrow.body.setVelocity(0);
+        arrow.x = target.x;
+        arrow.y = target.y;
+        scene.tweens.add({
+          targets: arrow,
+          scaleX: 0.25, scaleY: 0.25,
+          duration: 100, yoyo: true, ease: 'Power1'
+        });
+        hitCheck.remove();
+        checkAnswer.call(scene, index);
+        scene.time.delayedCall(500, () => {
+          if(!state.gameOver) {
+            arrow.destroy();                 
+            nextQuestion.call(scene);        
+          }
+        });
+      }
+    }
+  });
+}
+
+function checkAnswer(index) {
+  if(index === state.currentQuestion.a){
+    state.score += 10;
+    this.sound.play('startwinkle');
+    this.commentText.setText('BRILLIANT!').setColor('#00ff00');
+  } else {
+    this.sound.play('wrongbuzzer');
+    this.commentText.setText('OOPS!').setColor('#ff0000');
+    state.lives -= 1;
+    this.livesText.setText('Lives: ' + state.lives);
+
+    if(state.lives <= 0){
+      gameOver.call(this);
+    }
+  }
+  this.scoreText.setText('Score: ' + state.score);
+}
+
+function gameOver() {
+  const scene = this;
+  state.gameOver = true;
+  scene.archer.setVisible(false);
+  scene.optionTargets.forEach(t => { t.setVisible(false); t.optText.setVisible(false); });
+  scene.questionText.setVisible(false);
+  scene.commentText.setVisible(false);
+  scene.gameOverText.setText("💀 GAME OVER 💀\nPress SPACE to Restart").setVisible(true);
+}
+
+function restartGame() {
+  const scene = this;
+  state.score = 0;
+  state.lives = 3;
+  state.consecutiveCorrect = 0;
+  state.currentLevel = 0;
+  state.gameOver = false;
+  scene.scoreText.setText('Score: ' + state.score);
+  scene.livesText.setText('Lives: ' + state.lives);
+  scene.archer.setVisible(true);
+  scene.optionTargets.forEach(t => { t.setVisible(true); t.optText.setVisible(true); });
+  scene.questionText.setVisible(true);
+  scene.commentText.setVisible(true);
+  scene.gameOverText.setVisible(false);
+  nextQuestion.call(scene);
+}
+
+function update() {
+  if(!this.arrows) return;
+  this.arrows.children.each((arrow) => {
+    if(arrow.y < -50 || arrow.x > config.width) arrow.destroy();
+  });
+}
+</script>
+</body>
+</html>
